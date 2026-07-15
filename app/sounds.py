@@ -1,13 +1,31 @@
-"""Procedurally synthesized sound effects — no audio asset files needed.
+"""Sound effects: real audio files if present, synthesized fallback otherwise.
 
-Everything is generated with numpy at startup and turned into pygame Sounds.
-If the mixer can't initialize (no audio device, Docker), sounds are silently off.
+Drop WAV/OGG/MP3 files into assets/sounds/ to replace any effect:
+
+    slice*.wav      one or more swoosh/splat variants, picked at random
+    combo*.wav      one or more combo dings; sorted by name, indexed by level
+    bomb.wav  tick.wav  go.wav  gameover.wav  highscore.wav  submit.wav
+
+Effects without a matching file are synthesized with numpy at startup, so the
+game always has a full sound set. If the mixer can't initialize (no audio
+device, Docker), sounds are silently off. Only commit sounds you have the
+rights to distribute (e.g. CC0) — not ripped commercial game assets.
 """
 
 import random
+from pathlib import Path
 
 import numpy as np
 import pygame
+
+ASSET_DIR = Path(__file__).parent.parent / "assets" / "sounds"
+AUDIO_EXTS = ("*.wav", "*.ogg", "*.mp3")
+
+# default volume per effect (applied to files and synth alike)
+VOLUMES = {
+    "slice": 0.55, "combo": 0.5, "bomb": 0.9, "tick": 0.4,
+    "go": 0.5, "gameover": 0.6, "highscore": 0.6, "submit": 0.5,
+}
 
 
 def _env(n, sr, attack=0.005, tau=0.08):
@@ -51,6 +69,21 @@ def _jingle(freqs, dur_each, sr, tau=0.14):
     return np.concatenate([_tone(f, dur_each, sr, tau=tau) for f in freqs])
 
 
+def _load_files(stem):
+    """All audio files in ASSET_DIR whose name starts with `stem`, sorted."""
+    if not ASSET_DIR.is_dir():
+        return []
+    paths = sorted(p for ext in AUDIO_EXTS for p in ASSET_DIR.glob(ext)
+                   if p.stem.lower().startswith(stem))
+    sounds = []
+    for p in paths:
+        try:
+            sounds.append(pygame.mixer.Sound(str(p)))
+        except pygame.error as e:
+            print(f"sounds: could not load {p.name}: {e}")
+    return sounds
+
+
 class Sfx:
     def __init__(self):
         self.ok = False
@@ -65,32 +98,50 @@ class Sfx:
         sr = pygame.mixer.get_init()[0]
         rng = np.random.default_rng(7)
 
-        self._slices = [
-            self._make(_swoosh(rng, sr, smooth=s), 0.55) for s in (3, 6, 10)
+        loaded = []
+        slice_files = _load_files("slice")
+        if slice_files:
+            loaded.append("slice")
+        self._slices = slice_files or [
+            self._make(_swoosh(rng, sr, smooth=s)) for s in (3, 6, 10)
         ]
-        # one ding per combo level (x2..x6+), rising in pitch
-        self._dings = [
-            self._make(_tone(620 * (1.13 ** i), 0.22, sr, tau=0.09), 0.5)
-            for i in range(5)
+        combo_files = _load_files("combo")
+        if combo_files:
+            loaded.append("combo")
+        self._dings = combo_files or [
+            self._make(_tone(620 * (1.13 ** i), 0.22, sr, tau=0.09)) for i in range(5)
         ]
-        self._sounds = {
-            "bomb": self._make(_boom(rng, sr), 0.9),
-            "tick": self._make(_tone(880, 0.07, sr, tau=0.03, harmonics=(1.0,)), 0.4),
-            "go": self._make(_tone(1320, 0.28, sr, tau=0.12), 0.5),
-            "gameover": self._make(_jingle([660, 494, 440], 0.22, sr), 0.6),
-            "highscore": self._make(_jingle([523, 659, 784, 1047], 0.13, sr), 0.6),
-            "submit": self._make(_tone(1047, 0.15, sr, tau=0.07), 0.5),
+        synth = {
+            "bomb": lambda: _boom(rng, sr),
+            "tick": lambda: _tone(880, 0.07, sr, tau=0.03, harmonics=(1.0,)),
+            "go": lambda: _tone(1320, 0.28, sr, tau=0.12),
+            "gameover": lambda: _jingle([660, 494, 440], 0.22, sr),
+            "highscore": lambda: _jingle([523, 659, 784, 1047], 0.13, sr),
+            "submit": lambda: _tone(1047, 0.15, sr, tau=0.07),
         }
+        for name, make in synth.items():
+            files = _load_files(name)
+            if files:
+                loaded.append(name)
+            self._sounds[name] = files[0] if files else self._make(make())
+
+        for s in self._slices:
+            s.set_volume(VOLUMES["slice"])
+        for s in self._dings:
+            s.set_volume(VOLUMES["combo"])
+        for name, s in self._sounds.items():
+            s.set_volume(VOLUMES[name])
+
+        if loaded:
+            print(f"sounds: loaded from {ASSET_DIR}: {', '.join(loaded)}")
         self.ok = True
 
     @staticmethod
-    def _make(mono, volume):
+    def _make(mono):
         wave = np.clip(mono, -1.0, 1.0)
         pcm = (wave * 32767 * 0.85).astype(np.int16)
         stereo = np.ascontiguousarray(np.column_stack([pcm, pcm]))
-        sound = pygame.sndarray.make_sound(stereo)
-        sound.set_volume(volume)
-        return sound
+        return pygame.sndarray.make_sound(stereo)
 
     def play(self, name):
         if not self.ok:

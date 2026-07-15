@@ -12,8 +12,10 @@ time, and they slice fruit flying across the screen. Native **pygame** UI at
 - 💣 Bombs cost 30 points and kill your combo
 - 🏆 Leaderboard in SQLite (`data/leaderboard.db`) — every play is recorded,
   top 5 shown on screen; a legacy `leaderboard.json` is migrated automatically
-- 🔊 Sound effects (slices, combos, bombs, countdown) — synthesized with numpy
-  at startup, no audio files needed
+- 🔊 Real arcade sound effects — knife slices, squishy splats, explosions
+  ([Kenney](https://kenney.nl) CC0 packs, see `assets/sounds/CREDITS.md`);
+  drop your own WAV/OGG/MP3s into `assets/sounds/` to replace any of them,
+  and anything missing falls back to numpy-synthesized sounds
 - ✋ Fully touchless between players: hold your fingertip in the circle to start
 
 ## Stall laptop setup (Windows — recommended)
@@ -83,7 +85,8 @@ app/
   tracker.py       MediaPipe index-fingertip tracking (the "blade")
   game.py          Fruit physics, slice detection, combos, round state machine
   leaderboard.py   SQLite score store (full history, top-5 view)
-  sounds.py        Procedurally synthesized sound effects
+  sounds.py        Sound effects: assets/sounds/ files + synthesized fallback
+assets/sounds/     CC0 audio (Kenney packs) — swap in your own to customize
 setup.bat / run.bat   One-command setup + launch for the stall laptop
 ```
 
