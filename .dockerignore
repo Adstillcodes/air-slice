@@ -1,0 +1,9 @@
+data/
+.venv/
+__pycache__/
+*.pyc
+.git/
+.claude/
+README.md
+docker-compose.yml
+*.bat

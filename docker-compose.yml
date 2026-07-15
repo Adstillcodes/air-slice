@@ -1,0 +1,12 @@
+# LINUX HOSTS ONLY — see Dockerfile header. Run `xhost +local:` once first.
+services:
+  air-slice:
+    build: .
+    environment:
+      - DISPLAY=${DISPLAY}
+      - ROUND_SECONDS=20
+    devices:
+      - /dev/video0:/dev/video0   # webcam passthrough
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix   # X11 display passthrough
+      - ./data:/data                    # leaderboard survives restarts
