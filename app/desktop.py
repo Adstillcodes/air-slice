@@ -17,6 +17,7 @@ import pygame
 
 from .game import Game
 from .leaderboard import Leaderboard
+from .sounds import Sfx
 from .tracker import HandTracker
 
 WIN_W, WIN_H = 1280, 960
@@ -129,6 +130,7 @@ def _make_sprite(kind, px):
 
 class App:
     def __init__(self):
+        pygame.mixer.pre_init(44100, -16, 2, 256)  # small buffer = low audio latency
         pygame.init()
         pygame.display.set_caption("Air Slice — IEEE RAS")
         self.screen = pygame.display.set_mode((WIN_W, WIN_H), pygame.SCALED)
@@ -151,6 +153,9 @@ class App:
         self.flash_until = 0.0
         self.name_text = ""
         self.prev_phase = "idle"
+        self.sfx = Sfx()
+        self.st = None
+        self.prev_countdown_n = 0
 
     def sprite(self, kind, r):
         key = kind
@@ -174,6 +179,7 @@ class App:
                 elif entering_name:
                     if ev.key == pygame.K_RETURN:
                         self.game.submit_score(self.name_text)
+                        self.sfx.play("submit")
                     elif ev.key == pygame.K_BACKSPACE:
                         self.name_text = self.name_text[:-1]
                     elif ev.unicode and (ev.unicode.isalnum() or ev.unicode in " _-") and len(self.name_text) < 12:
@@ -185,11 +191,25 @@ class App:
     def tick(self):
         now = time.monotonic()
         events = self.game.update(self.cam.fingertip, now)
+        self.st = self.game.state([])
 
         if self.game.phase != self.prev_phase:
             if self.game.phase == "gameover":
                 self.name_text = ""
+                self.sfx.play("gameover")
+                if self.game.qualifies:
+                    self.sfx.play("highscore")
+            elif self.game.phase == "playing" and self.prev_phase == "countdown":
+                self.sfx.play("go")
             self.prev_phase = self.game.phase
+
+        if self.game.phase == "countdown":
+            n = math.ceil(self.st["countdown"])
+            if n != self.prev_countdown_n and n > 0:
+                self.sfx.play("tick")
+            self.prev_countdown_n = n
+        else:
+            self.prev_countdown_n = 0
 
         if self.game.finger:
             self.trail.append((self.game.finger, now))
@@ -197,12 +217,15 @@ class App:
 
         for e in events:
             if e["type"] == "slice":
+                self.sfx.play("slice")
+                self.sfx.combo(e["combo"])
                 self.burst(e["x"] * WIN_W, e["y"] * WIN_H, JUICE[e["kind"]], 16)
                 text = f"+{e['points']}" + (f"  x{e['combo']}" if e["combo"] > 1 else "")
                 self.floaters.append({"x": e["x"] * WIN_W, "y": e["y"] * WIN_H,
                                       "text": text, "life": 1.0,
                                       "color": YELLOW if e["combo"] > 1 else WHITE})
             elif e["type"] == "bomb":
+                self.sfx.play("bomb")
                 self.burst(e["x"] * WIN_W, e["y"] * WIN_H, JUICE["bomb"], 26)
                 self.floaters.append({"x": e["x"] * WIN_W, "y": e["y"] * WIN_H,
                                       "text": f"-{e['penalty']}", "life": 1.0, "color": RED})
@@ -305,7 +328,7 @@ class App:
 
     def draw_hud(self, now):
         g = self.game
-        st = g.state([])
+        st = self.st or g.state([])
 
         self.text(f"{self.clock.get_fps():.0f} fps", 18, (150, 160, 180), (10, WIN_H - 28), shadow=False)
 

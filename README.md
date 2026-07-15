@@ -10,7 +10,10 @@ time, and they slice fruit flying across the screen. Native **pygame** UI at
 - ⏱️ 20-second rounds — constant throughput at the stall
 - 🔥 Combo multiplier (up to ×5) for chained slices
 - 💣 Bombs cost 30 points and kill your combo
-- 🏆 Persistent top-5 leaderboard (`data/leaderboard.json`)
+- 🏆 Leaderboard in SQLite (`data/leaderboard.db`) — every play is recorded,
+  top 5 shown on screen; a legacy `leaderboard.json` is migrated automatically
+- 🔊 Sound effects (slices, combos, bombs, countdown) — synthesized with numpy
+  at startup, no audio files needed
 - ✋ Fully touchless between players: hold your fingertip in the circle to start
 
 ## Stall laptop setup (Windows — recommended)
@@ -67,7 +70,7 @@ docker compose up --build
 | Variable        | Default | Meaning                        |
 |-----------------|---------|--------------------------------|
 | `ROUND_SECONDS` | `20`    | Round length in seconds        |
-| `DATA_DIR`      | `data`  | Where the leaderboard JSON lives |
+| `DATA_DIR`      | `data`  | Where the leaderboard database lives |
 
 Gameplay tuning (slice speed threshold, spawn rates, bomb chance, points) is
 all constants at the top of [`app/game.py`](app/game.py).
@@ -79,7 +82,8 @@ app/
   desktop.py       pygame UI: window, sprites, HUD, effects
   tracker.py       MediaPipe index-fingertip tracking (the "blade")
   game.py          Fruit physics, slice detection, combos, round state machine
-  leaderboard.py   Persistent top-5
+  leaderboard.py   SQLite score store (full history, top-5 view)
+  sounds.py        Procedurally synthesized sound effects
 setup.bat / run.bat   One-command setup + launch for the stall laptop
 ```
 
@@ -91,6 +95,7 @@ renders at 60 fps and never blocks on inference.
 - Face the webcam toward the player, not the crowd — single-hand fingertip
   tracking stays robust even with people clustered behind the player.
 - Good lighting on the player's hand improves tracking a lot.
-- Delete `data/leaderboard.json` to reset the leaderboard before the event.
+- Delete `data/leaderboard.db` to reset the leaderboard before the event
+  (or `sqlite3 data/leaderboard.db "DELETE FROM scores"` to keep the file).
 - 20-second rounds + the leaderboard = people queue up to beat their friends.
   That queue is the stall.

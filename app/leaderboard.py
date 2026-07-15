@@ -1,8 +1,11 @@
-"""Top-5 leaderboard persisted to a JSON file (survives container restarts via volume)."""
+"""Leaderboard in SQLite. Stores every play; serves the top 5 for display.
+
+Auto-migrates a legacy leaderboard.json (pre-SQL format) on first run.
+"""
 
 import json
 import os
-import threading
+import sqlite3
 from pathlib import Path
 
 MAX_ENTRIES = 5
@@ -10,42 +13,82 @@ MAX_ENTRIES = 5
 
 class Leaderboard:
     def __init__(self):
-        self._path = Path(os.getenv("DATA_DIR", "data")) / "leaderboard.json"
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.Lock()
-        self._scores = self._load()
+        data_dir = Path(os.getenv("DATA_DIR", "data"))
+        data_dir.mkdir(parents=True, exist_ok=True)
+        self._db = data_dir / "leaderboard.db"
+        self._init_db()
+        self._migrate_legacy_json(data_dir / "leaderboard.json")
 
-    def _load(self):
+    def _connect(self):
+        con = sqlite3.connect(self._db, timeout=5)
+        con.execute("PRAGMA journal_mode=WAL")
+        return con
+
+    def _init_db(self):
+        con = self._connect()
         try:
-            data = json.loads(self._path.read_text(encoding="utf-8"))
-            return [
-                {"name": str(e["name"])[:12], "score": int(e["score"])}
-                for e in data
-            ][:MAX_ENTRIES]
-        except (OSError, ValueError, KeyError, TypeError):
-            return []
+            con.execute(
+                """CREATE TABLE IF NOT EXISTS scores (
+                       id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                       name      TEXT    NOT NULL,
+                       score     INTEGER NOT NULL,
+                       played_at TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+                   )"""
+            )
+            con.execute("CREATE INDEX IF NOT EXISTS idx_scores_score ON scores(score DESC)")
+            con.commit()
+        finally:
+            con.close()
 
-    def _save(self):
-        tmp = self._path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self._scores, indent=2), encoding="utf-8")
-        tmp.replace(self._path)
+    def _migrate_legacy_json(self, path):
+        if not path.exists():
+            return
+        try:
+            entries = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        con = self._connect()
+        try:
+            if con.execute("SELECT COUNT(*) FROM scores").fetchone()[0] == 0:
+                con.executemany(
+                    "INSERT INTO scores (name, score) VALUES (?, ?)",
+                    [(str(e["name"])[:12], int(e["score"])) for e in entries],
+                )
+                con.commit()
+        except (KeyError, TypeError, ValueError):
+            return
+        finally:
+            con.close()
+        path.rename(path.with_suffix(".json.migrated"))
 
     def qualifies(self, score):
         if score <= 0:
             return False
-        with self._lock:
-            if len(self._scores) < MAX_ENTRIES:
-                return True
-            return score > self._scores[-1]["score"]
+        con = self._connect()
+        try:
+            rows = con.execute(
+                "SELECT score FROM scores ORDER BY score DESC LIMIT ?", (MAX_ENTRIES,)
+            ).fetchall()
+        finally:
+            con.close()
+        return len(rows) < MAX_ENTRIES or score > rows[-1][0]
 
     def add(self, name, score):
         name = (name or "").strip()[:12] or "???"
-        with self._lock:
-            self._scores.append({"name": name, "score": int(score)})
-            self._scores.sort(key=lambda e: e["score"], reverse=True)
-            del self._scores[MAX_ENTRIES:]
-            self._save()
+        con = self._connect()
+        try:
+            con.execute("INSERT INTO scores (name, score) VALUES (?, ?)", (name, int(score)))
+            con.commit()
+        finally:
+            con.close()
 
     def top(self):
-        with self._lock:
-            return list(self._scores)
+        con = self._connect()
+        try:
+            rows = con.execute(
+                "SELECT name, score FROM scores ORDER BY score DESC, played_at ASC LIMIT ?",
+                (MAX_ENTRIES,),
+            ).fetchall()
+        finally:
+            con.close()
+        return [{"name": n, "score": s} for n, s in rows]
