@@ -166,8 +166,7 @@ class App:
     # ------------------------------------------------------------------ input
 
     def handle_events(self):
-        entering_name = (self.game.phase == "gameover" and self.game.qualifies
-                         and not self.game.submitted)
+        entering_name = self.game.phase == "entername"
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
                 return False
@@ -178,7 +177,7 @@ class App:
                     pygame.display.toggle_fullscreen()
                 elif entering_name:
                     if ev.key == pygame.K_RETURN:
-                        self.game.submit_score(self.name_text)
+                        self.game.submit_name(self.name_text)
                         self.sfx.play("submit")
                     elif ev.key == pygame.K_BACKSPACE:
                         self.name_text = self.name_text[:-1]
@@ -194,8 +193,9 @@ class App:
         self.st = self.game.state([])
 
         if self.game.phase != self.prev_phase:
-            if self.game.phase == "gameover":
+            if self.game.phase == "entername":
                 self.name_text = ""
+            elif self.game.phase == "gameover":
                 self.sfx.play("gameover")
                 if self.game.qualifies:
                     self.sfx.play("highscore")
@@ -335,6 +335,7 @@ class App:
         if g.phase == "playing":
             self.text(f"{g.score}", 56, WHITE, (36, 24))
             self.text("SCORE", 24, (150, 255, 190), (40, 96))
+            self.text(g.player_name, 24, (205, 220, 235), (40, 128))
             frac = st["time_left"] / st["round_seconds"] if st["round_seconds"] else 0
             bar = pygame.Rect(int(WIN_W * 0.3), 36, int(WIN_W * 0.4), 16)
             pygame.draw.rect(self.screen, (255, 255, 255, 40), bar, border_radius=8)
@@ -352,12 +353,17 @@ class App:
                 self.center_text("AIR SLICE", int(WIN_H * 0.14), 96, GREEN)
                 self.center_text("Fruit Ninja with your bare hand — no controller", int(WIN_H * 0.22), 28, (205, 220, 235))
             else:
-                self.center_text("TIME'S UP!", int(WIN_H * 0.12), 72, (255, 154, 61))
-                self.center_text(f"SCORE  {g.score}", int(WIN_H * 0.21), 56, WHITE)
+                self.center_text("TIME'S UP!", int(WIN_H * 0.10), 72, (255, 154, 61))
+                self.center_text(f"{g.player_name}  ·  {g.score}", int(WIN_H * 0.18), 56, WHITE)
+                if g.qualifies:
+                    self.center_text("TOP 5! You're on the board!", int(WIN_H * 0.245), 34, YELLOW)
             self.draw_start_target(now, st)
             self.draw_leaderboard(st)
-            if g.phase == "gameover" and g.qualifies and not g.submitted:
-                self.draw_name_entry()
+
+        elif g.phase == "entername":
+            self.center_text("GET READY", int(WIN_H * 0.16), 72, GREEN)
+            self.draw_name_entry()
+            self.draw_leaderboard(st)
 
         elif g.phase == "countdown":
             n = math.ceil(st["countdown"])
@@ -394,12 +400,12 @@ class App:
 
     def draw_name_entry(self):
         w, h = 560, 200
-        x, y = (WIN_W - w) // 2, int(WIN_H * 0.62)
+        x, y = (WIN_W - w) // 2, int(WIN_H * 0.38)
         panel = pygame.Surface((w, h), pygame.SRCALPHA)
         pygame.draw.rect(panel, (12, 16, 30, 225), panel.get_rect(), border_radius=16)
         pygame.draw.rect(panel, GREEN, panel.get_rect(), 3, border_radius=16)
         self.screen.blit(panel, (x, y))
-        self.center_text("TOP 5!  Type your name + Enter", y + 40, 28, GREEN)
+        self.center_text("Type your name, then Enter to start", y + 40, 28, GREEN)
         caret = "_" if int(time.monotonic() * 2) % 2 else " "
         self.center_text((self.name_text or "") + caret, y + 110, 56, WHITE)
 

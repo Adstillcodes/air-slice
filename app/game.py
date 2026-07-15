@@ -65,12 +65,12 @@ class Game:
         self._ids = count(1)
         self._last_t = None
         self.finger = None
-        self.phase = "idle"          # idle | countdown | playing | gameover
+        self.phase = "idle"          # idle | entername | countdown | playing | gameover
         self.score = 0
         self.combo = 0
         self.start_hover = 0.0
         self.qualifies = False
-        self.submitted = False
+        self.player_name = ""
         self._phase_t = 0.0
         self._round_end = 0.0
         self._round_start = 0.0
@@ -116,9 +116,20 @@ class Game:
         if inside:
             self.start_hover += dt
             if self.start_hover >= START_HOVER_SECONDS:
-                self._begin_countdown(now)
+                self._begin_name_entry()
         else:
             self.start_hover = 0.0
+
+    def _begin_name_entry(self):
+        self.phase = "entername"
+        self.start_hover = 0.0
+        self.player_name = ""
+
+    def submit_name(self, name):
+        """Called from the UI when the player confirms their name — starts the game."""
+        if self.phase == "entername":
+            self.player_name = (name or "").strip()[:12] or "???"
+            self._begin_countdown(self._last_t or 0.0)
 
     def _begin_countdown(self, now):
         self.phase = "countdown"
@@ -127,7 +138,6 @@ class Game:
         self.score = 0
         self.combo = 0
         self.qualifies = False
-        self.submitted = False
         self.fruits.clear()
 
     def _begin_round(self, now):
@@ -141,7 +151,8 @@ class Game:
         self.phase = "gameover"
         self.fruits.clear()
         self.combo = 0
-        self.qualifies = self._lb.qualifies(self.score)
+        self.qualifies = self._lb.qualifies(self.score)  # before add: "did I crack the top 5?"
+        self._lb.add(self.player_name, self.score)       # every play is recorded
 
     # ----------------------------------------------------------------- fruits
 
@@ -195,11 +206,6 @@ class Game:
 
     # ------------------------------------------------------------------ state
 
-    def submit_score(self, name):
-        if self.phase == "gameover" and self.qualifies and not self.submitted:
-            self._lb.add(name, self.score)
-            self.submitted = True
-
     def state(self, events):
         now = self._last_t or 0.0
         return {
@@ -221,6 +227,6 @@ class Game:
             ],
             "leaderboard": self._lb.top(),
             "qualifies": self.qualifies,
-            "submitted": self.submitted,
+            "player": self.player_name,
             "events": events,
         }

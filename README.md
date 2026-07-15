@@ -61,11 +61,12 @@ docker compose up --build
 
 ## How to play
 
-1. Hold your index fingertip inside the green circle for 1 second → countdown.
-2. Slice fruit by swiping your fingertip through it — slow touches don't cut.
-3. Chain slices within 0.6 s to build the combo multiplier (up to ×5).
-4. Don't hit the 💣 — −30 points and your combo resets.
-5. Time's up: a top-5 score lets you type your name onto the leaderboard.
+1. Hold your index fingertip inside the green circle for 1 second.
+2. Type your name and press Enter → countdown starts.
+3. Slice fruit by swiping your fingertip through it — slow touches don't cut.
+4. Chain slices within 0.6 s to build the combo multiplier (up to ×5).
+5. Don't hit the 💣 — −30 points and your combo resets.
+6. Time's up: your score is saved automatically; top-5 scores hit the board.
 
 ## Configuration (env vars)
 
