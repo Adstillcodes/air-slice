@@ -18,9 +18,29 @@ time, and they slice fruit flying across the screen. Native **pygame** UI at
   and anything missing falls back to numpy-synthesized sounds
 - ✋ Fully touchless between players: hold your fingertip in the circle to start
 
-## Stall laptop setup (Windows — recommended)
+## Just download and run (no Python needed) ⭐
 
-**Requires Python 3.9–3.12** (MediaPipe does not support 3.13/3.14):
+Grab the build for your OS from
+[**Releases**](https://github.com/Adstillcodes/air-slice/releases) — Python is
+bundled inside, nothing to install:
+
+| OS | File | How to run |
+|----|------|------------|
+| Windows | `AirSlice-windows.zip` | Unzip → `AirSlice\AirSlice.exe`. SmartScreen may warn (unsigned): *More info → Run anyway*. |
+| macOS (Apple Silicon) | `AirSlice-macos-arm64.zip` | Unzip → right-click `AirSlice.app` → *Open* (unsigned), allow camera. |
+| Linux | `AirSlice-linux.zip` | Unzip → `./AirSlice/AirSlice`. Needs system `libGL` (preinstalled on desktop distros). |
+
+The leaderboard lives in a `data/` folder next to the executable, so the whole
+thing is portable — USB-stick it to the stall laptop.
+
+Builds are produced automatically by GitHub Actions
+([`.github/workflows/build.yml`](.github/workflows/build.yml)) on every `v*`
+tag, one per OS (PyInstaller can't cross-compile). To cut a new release:
+`git tag v1.x.x && git push --tags`.
+
+## Run from source (Python 3.9–3.12)
+
+MediaPipe does not support Python 3.13/3.14:
 
 ```
 winget install Python.Python.3.12
@@ -88,7 +108,9 @@ app/
   leaderboard.py   SQLite score store (full history, top-5 view)
   sounds.py        Sound effects: assets/sounds/ files + synthesized fallback
 assets/sounds/     CC0 audio (Kenney packs) — swap in your own to customize
-setup.bat / run.bat   One-command setup + launch for the stall laptop
+setup.bat / run.bat   One-command setup + launch from source (Windows)
+launcher.py        PyInstaller entry point
+AirSlice.spec      PyInstaller build config (bundles MediaPipe models + sounds)
 ```
 
 Camera capture + hand tracking run on a background thread; the game loop

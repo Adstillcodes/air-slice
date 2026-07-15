@@ -6,14 +6,23 @@ Auto-migrates a legacy leaderboard.json (pre-SQL format) on first run.
 import json
 import os
 import sqlite3
+import sys
 from pathlib import Path
 
 MAX_ENTRIES = 5
 
 
+def _default_data_dir():
+    if getattr(sys, "frozen", False):
+        # PyInstaller build: keep data next to the executable, not the CWD
+        return Path(sys.executable).parent / "data"
+    return Path("data")
+
+
 class Leaderboard:
     def __init__(self):
-        data_dir = Path(os.getenv("DATA_DIR", "data"))
+        env = os.getenv("DATA_DIR")
+        data_dir = Path(env) if env else _default_data_dir()
         data_dir.mkdir(parents=True, exist_ok=True)
         self._db = data_dir / "leaderboard.db"
         self._init_db()
