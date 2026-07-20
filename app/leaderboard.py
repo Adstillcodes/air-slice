@@ -76,7 +76,11 @@ class Leaderboard:
         con = self._connect()
         try:
             rows = con.execute(
-                "SELECT score FROM scores ORDER BY score DESC LIMIT ?", (MAX_ENTRIES,)
+                """SELECT MAX(score) as max_score 
+                   FROM scores 
+                   GROUP BY name 
+                   ORDER BY max_score DESC 
+                   LIMIT ?""", (MAX_ENTRIES,)
             ).fetchall()
         finally:
             con.close()
@@ -91,11 +95,26 @@ class Leaderboard:
         finally:
             con.close()
 
+    def has_player(self, name):
+        name = (name or "").strip()[:12]
+        if not name:
+            return False
+        con = self._connect()
+        try:
+            row = con.execute("SELECT 1 FROM scores WHERE name = ? COLLATE NOCASE LIMIT 1", (name,)).fetchone()
+            return row is not None
+        finally:
+            con.close()
+
     def top(self):
         con = self._connect()
         try:
             rows = con.execute(
-                "SELECT name, score FROM scores ORDER BY score DESC, played_at ASC LIMIT ?",
+                """SELECT name, MAX(score) as max_score 
+                   FROM scores 
+                   GROUP BY name 
+                   ORDER BY max_score DESC, MAX(played_at) ASC 
+                   LIMIT ?""",
                 (MAX_ENTRIES,),
             ).fetchall()
         finally:

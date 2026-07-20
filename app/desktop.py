@@ -9,8 +9,10 @@ Run:  python -m app.desktop      (ESC quits, F11 toggles fullscreen)
 
 import math
 import random
+import sys
 import threading
 import time
+from pathlib import Path
 
 import cv2
 import pygame
@@ -25,17 +27,20 @@ CAM_W, CAM_H = 640, 480
 TRACK_W, TRACK_H = 320, 240   # tracking runs on a downscaled frame for speed
 TRAIL_SECONDS = 0.25
 
-GREEN = (46, 230, 168)
-YELLOW = (255, 213, 74)
-RED = (255, 82, 82)
+CLUB_PURPLE = (97, 17, 107)
+CLUB_CRIMSON = (153, 1, 46)
+
+GREEN = (255, 26, 83)      # Bright crimson for accents/glow (replaces Green)
+YELLOW = (255, 180, 200)   # Soft pink/white for highlights (replaces Yellow)
+RED = CLUB_CRIMSON         # True Crimson for alerts/bad stuff
 WHITE = (240, 245, 255)
 
 JUICE = {
-    "apple": (255, 82, 82),
-    "orange": (255, 167, 38),
-    "banana": (255, 233, 92),
-    "watermelon": (255, 79, 109),
-    "bomb": (154, 160, 180),
+    "apple": CLUB_CRIMSON,
+    "orange": (200, 40, 80),
+    "banana": (255, 180, 200),
+    "watermelon": CLUB_PURPLE,
+    "bomb": (50, 10, 50),
 }
 
 
@@ -51,30 +56,35 @@ class Camera(threading.Thread):
         self.frame_rgb = None     # mirrored, CAM_W x CAM_H
         self.frame_id = 0
         self.fingertip = None
+        self.faces = []
+        self.hand_area = 0.0
         self.error = None
         self._quit = threading.Event()
+        self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) if sys.platform == "win32" else cv2.VideoCapture(0)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_W)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_H)
+        if not self.cap.isOpened():
+            self.error = "Could not open the webcam. Close other apps using it (e.g. the browser tab) and restart."
 
     def run(self):
-        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_W)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_H)
-        if not cap.isOpened():
-            self.error = "Could not open the webcam. Close other apps using it (e.g. the browser tab) and restart."
+        if self.error:
             return
         tracker = HandTracker()
         try:
             while not self._quit.is_set():
-                ok, frame = cap.read()
+                ok, frame = self.cap.read()
                 if not ok:
                     time.sleep(0.02)
                     continue
                 frame = cv2.flip(frame, 1)  # mirror so it matches what the player sees
+                frame = cv2.resize(frame, (CAM_W, CAM_H))
                 small = cv2.resize(frame, (TRACK_W, TRACK_H))
-                self.fingertip = tracker.fingertip(small)
+                self.fingertip, self.faces, self.hand_area = tracker.process(small)
                 self.frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 self.frame_id += 1
         finally:
-            cap.release()
+            if hasattr(self, 'cap'):
+                self.cap.release()
             tracker.close()
 
     def stop(self):
@@ -133,7 +143,8 @@ class App:
         pygame.mixer.pre_init(44100, -16, 2, 256)  # small buffer = low audio latency
         pygame.init()
         pygame.display.set_caption("Air Slice — IEEE RAS")
-        self.screen = pygame.display.set_mode((WIN_W, WIN_H), pygame.SCALED)
+        flags = pygame.SCALED | pygame.FULLSCREEN if sys.platform == "darwin" else pygame.SCALED
+        self.screen = pygame.display.set_mode((WIN_W, WIN_H), flags)
         self.clock = pygame.time.Clock()
         self.fonts = {
             size: pygame.font.SysFont("segoeui", size, bold=True)
@@ -143,11 +154,26 @@ class App:
         self.cam = Camera()
         self.overlay = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
         self.dim = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-        self.dim.fill((5, 8, 18, 90))
+        self.dim.fill((30, 5, 33, 90))
         self.sprites = {}
         self.cam_surface = None
         self.cam_frame_id = -1
         self.trail = []
+        try:
+            self.logo_img = pygame.image.load(Path(__file__).parent / "IEEE_RAS_logo.png").convert_alpha()
+            w, h = self.logo_img.get_size()
+            self.logo_img = pygame.transform.smoothscale(self.logo_img, (180, int(h * (180 / w))))
+        except Exception as e:
+            print("Could not load logo:", e)
+            self.logo_img = None
+            
+        try:
+            self.qr_img = pygame.image.load(Path(__file__).parent / "qr-code.png").convert_alpha()
+            w, h = self.qr_img.get_size()
+            self.qr_img = pygame.transform.smoothscale(self.qr_img, (220, int(h * (220 / w))))
+        except Exception as e:
+            print("Could not load QR code:", e)
+            self.qr_img = None
         self.particles = []
         self.floaters = []
         self.flash_until = 0.0
@@ -166,16 +192,21 @@ class App:
     # ------------------------------------------------------------------ input
 
     def handle_events(self):
-        entering_name = self.game.phase == "entername"
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
                 return False
             if ev.type == pygame.KEYDOWN:
-                if ev.key == pygame.K_ESCAPE:
-                    return False
                 if ev.key == pygame.K_F11:
                     pygame.display.toggle_fullscreen()
-                elif entering_name:
+                elif self.game.phase == "confirmname":
+                    if ev.key == pygame.K_RETURN:
+                        self.game.confirm_name(True)
+                        self.sfx.play("submit")
+                    elif ev.key == pygame.K_ESCAPE or ev.key == pygame.K_BACKSPACE:
+                        self.game.confirm_name(False)
+                elif ev.key == pygame.K_ESCAPE:
+                    return False
+                elif self.game.phase == "entername":
                     if ev.key == pygame.K_RETURN:
                         self.game.submit_name(self.name_text)
                         self.sfx.play("submit")
@@ -253,6 +284,11 @@ class App:
         else:
             self.screen.fill((5, 6, 12))
         self.screen.blit(self.dim, (0, 0))
+        
+        for (fx, fy, fw, fh) in self.cam.faces:
+            x, y = int(fx * WIN_W), int(fy * WIN_H)
+            w, h = int(fw * WIN_W), int(fh * WIN_H)
+            pygame.draw.rect(self.screen, WHITE, pygame.Rect(x, y, w, h), 2, border_radius=12)
 
         for f in self.game.fruits:
             spr = self.sprite(f.kind, f.r)
@@ -280,14 +316,14 @@ class App:
     def draw_trail(self, now):
         pts = [((p[0] * WIN_W, p[1] * WIN_H), t) for p, t in self.trail]
         for i in range(1, len(pts)):
-            a = 1 - (now - pts[i][1]) / TRAIL_SECONDS
-            color = (80, 240, 255, int(230 * a))
+            a = max(0.0, 1 - (now - pts[i][1]) / TRAIL_SECONDS)
+            color = (194, 34, 214, int(230 * a))
             w = max(2, int(3 + 12 * a))
             pygame.draw.line(self.overlay, color, pts[i - 1][0], pts[i][0], w)
             pygame.draw.circle(self.overlay, color, pts[i][0], w // 2)
         if self.game.finger:
             fx, fy = self.game.finger[0] * WIN_W, self.game.finger[1] * WIN_H
-            pygame.draw.circle(self.overlay, (223, 252, 255, 255), (fx, fy), 9)
+            pygame.draw.circle(self.overlay, (255, 200, 255, 255), (fx, fy), 9)
 
     def draw_particles(self, dt):
         self.particles = [p for p in self.particles if p["life"] > 0]
@@ -306,13 +342,14 @@ class App:
             f["y"] -= 75 * dt
             f["life"] -= dt * 1.1
             if f["life"] > 0:
-                img = self.fonts[44].render(f["text"], True, f["color"])
+                img = self.fonts[44].render(f["text"], True, WHITE)
                 img.set_alpha(int(255 * min(1, f["life"])))
                 self.screen.blit(img, img.get_rect(center=(f["x"], f["y"])))
 
     # -------------------------------------------------------------------- hud
 
     def text(self, s, size, color, pos, align="topleft", alpha=255, shadow=True):
+        color = WHITE
         img = self.fonts[size].render(s, True, color)
         rect = img.get_rect(**{align: pos})
         if shadow:
@@ -329,8 +366,13 @@ class App:
     def draw_hud(self, now):
         g = self.game
         st = self.st or g.state([])
+        
+        if self.logo_img:
+            self.screen.blit(self.logo_img, (WIN_W - self.logo_img.get_width() - 20, 20))
 
         self.text(f"{self.clock.get_fps():.0f} fps", 18, (150, 160, 180), (10, WIN_H - 28), shadow=False)
+        scale_pct = int(min(1.0, math.sqrt(self.cam.hand_area) * 2) * 100) if getattr(self.cam, "hand_area", 0) else 0
+        self.text(f"Player Scale: {scale_pct}%", 18, (150, 160, 180), (10, WIN_H - 52), shadow=False)
 
         if g.phase == "playing":
             self.text(f"{g.score}", 56, WHITE, (36, 24))
@@ -357,10 +399,20 @@ class App:
                 self.center_text(f"{g.player_name}  ·  {g.score}", int(WIN_H * 0.18), 56, WHITE)
                 if g.qualifies:
                     self.center_text("TOP 5! You're on the board!", int(WIN_H * 0.245), 34, YELLOW)
+                
+                if self.qr_img:
+                    qr_x, qr_y = 60, WIN_H // 2 - self.qr_img.get_height() // 2 + 50
+                    self.screen.blit(self.qr_img, (qr_x, qr_y))
+                    self.text("Join our WhatsApp", 24, GREEN, (qr_x + 110, qr_y - 60), align="center")
+                    self.text("Tech Community", 24, GREEN, (qr_x + 110, qr_y - 30), align="center")
+                    self.text("to be included", 24, WHITE, (qr_x + 110, qr_y + self.qr_img.get_height() + 20), align="center")
+                    self.text("in the development", 24, WHITE, (qr_x + 110, qr_y + self.qr_img.get_height() + 50), align="center")
+                    self.text("of more such", 24, WHITE, (qr_x + 110, qr_y + self.qr_img.get_height() + 80), align="center")
+                    self.text("exciting projects!", 24, WHITE, (qr_x + 110, qr_y + self.qr_img.get_height() + 110), align="center")
             self.draw_start_target(now, st)
             self.draw_leaderboard(st)
 
-        elif g.phase == "entername":
+        elif g.phase in ("entername", "confirmname"):
             self.center_text("GET READY", int(WIN_H * 0.16), 72, GREEN)
             self.draw_name_entry()
             self.draw_leaderboard(st)
@@ -388,7 +440,7 @@ class App:
         rows = st["leaderboard"]
         x, y, w = WIN_W - 330, int(WIN_H * 0.32), 290
         panel = pygame.Surface((w, 78 + max(1, len(rows)) * 44), pygame.SRCALPHA)
-        pygame.draw.rect(panel, (8, 12, 24, 185), panel.get_rect(), border_radius=14)
+        pygame.draw.rect(panel, (97, 17, 107, 185), panel.get_rect(), border_radius=14)
         self.screen.blit(panel, (x, y))
         self.text("TOP 5", 28, GREEN, (x + 22, y + 14))
         if not rows:
@@ -402,12 +454,18 @@ class App:
         w, h = 560, 200
         x, y = (WIN_W - w) // 2, int(WIN_H * 0.38)
         panel = pygame.Surface((w, h), pygame.SRCALPHA)
-        pygame.draw.rect(panel, (12, 16, 30, 225), panel.get_rect(), border_radius=16)
+        pygame.draw.rect(panel, (97, 17, 107, 225), panel.get_rect(), border_radius=16)
         pygame.draw.rect(panel, GREEN, panel.get_rect(), 3, border_radius=16)
         self.screen.blit(panel, (x, y))
-        self.center_text("Type your name, then Enter to start", y + 40, 28, GREEN)
-        caret = "_" if int(time.monotonic() * 2) % 2 else " "
-        self.center_text((self.name_text or "") + caret, y + 110, 56, WHITE)
+        
+        if self.game.phase == "confirmname":
+            self.center_text("Name taken! Continue to better rank?", y + 34, 24, YELLOW)
+            self.center_text("ENTER to confirm, ESC to go back", y + 70, 24, (136, 150, 170))
+            self.center_text(self.name_text, y + 130, 44, WHITE)
+        else:
+            self.center_text("Type your name, then Enter to start", y + 40, 28, GREEN)
+            caret = "_" if int(time.monotonic() * 2) % 2 else " "
+            self.center_text((self.name_text or "") + caret, y + 110, 56, WHITE)
 
     # -------------------------------------------------------------------- run
 

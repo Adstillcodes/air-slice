@@ -129,7 +129,17 @@ class Game:
         """Called from the UI when the player confirms their name — starts the game."""
         if self.phase == "entername":
             self.player_name = (name or "").strip()[:12] or "???"
-            self._begin_countdown(self._last_t or 0.0)
+            if self._lb.has_player(self.player_name):
+                self.phase = "confirmname"
+            else:
+                self._begin_countdown(self._last_t or 0.0)
+
+    def confirm_name(self, continue_playing: bool):
+        if self.phase == "confirmname":
+            if continue_playing:
+                self._begin_countdown(self._last_t or 0.0)
+            else:
+                self._begin_name_entry()
 
     def _begin_countdown(self, now):
         self.phase = "countdown"
